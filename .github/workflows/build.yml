@@ -22,7 +22,7 @@ jobs:
         cd android-client
         gradle assembleDebug
     - name: Upload APK
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: radar-family-app
         path: android-client/app/build/outputs/apk/debug/app-debug.apk
