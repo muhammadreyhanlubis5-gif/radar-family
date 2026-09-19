@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RADAR FAMILY - Device Management Console</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <h1>RADAR FAMILY</h1>
+            <span class="subtitle">Device Management Console</span>
+        </div>
+        <div class="status-indicator">
+            <span class="dot" id="global-status-dot"></span>
+            <span id="global-status-text">Disconnected</span>
+        </div>
+    </header>
+
+    <main class="dashboard-grid">
+        <!-- Panel 1: Device Status -->
+        <section class="panel" id="panel-device">
+            <div class="panel-header">
+                <h2>[ Device Status ]</h2>
+            </div>
+            <div class="panel-content">
+                <button id="btn-connect" class="btn">Connect via USB</button>
+                <div class="device-info mt-1">
+                    <p><strong>Status:</strong> <span id="info-status" class="text-danger">Not Connected</span></p>
+                    <p><strong>Name:</strong> <span id="info-name">---</span></p>
+                    <p><strong>Vendor ID:</strong> <span id="info-vid">---</span></p>
+                    <p><strong>Product ID:</strong> <span id="info-pid">---</span></p>
+                    <p><strong>Serial Number:</strong> <span id="info-serial">---</span></p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Panel 2: Config Deployer -->
+        <section class="panel" id="panel-deployer">
+            <div class="panel-header">
+                <h2>[ Config Deployer ]</h2>
+            </div>
+            <div class="panel-content">
+                <div class="upload-zone" id="upload-zone-json">
+                    <p>Drop <code>rules.json</code> here or click to select</p>
+                    <input type="file" id="input-json" accept=".json" hidden>
+                </div>
+                <div class="mt-1">
+                    <button id="btn-deploy-config" class="btn" disabled>Deploy Config to Device</button>
+                </div>
+                
+                <div class="upload-zone mt-2" id="upload-zone-apk">
+                    <p>Drop <code>.apk</code> here or click to select</p>
+                    <input type="file" id="input-apk" accept=".apk" hidden>
+                </div>
+                <div class="mt-1">
+                    <button id="btn-install-apk" class="btn" disabled>Install APK</button>
+                </div>
+
+                <div class="progress-container mt-1 hidden" id="progress-container">
+                    <div class="progress-bar" id="progress-bar"></div>
+                </div>
+                <div class="status-message mt-1" id="deploy-status"></div>
+            </div>
+        </section>
+
+        <!-- Panel 3: Log Monitor -->
+        <section class="panel" id="panel-logs">
+            <div class="panel-header log-header">
+                <h2>[ Log Monitor ]</h2>
+                <button id="btn-clear-logs" class="btn btn-small">Clear</button>
+            </div>
+            <div class="panel-content log-content">
+                <div class="log-feed" id="log-feed">
+                    <!-- Logs will appear here -->
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>RADAR FAMILY v1.0.0 | <span id="webusb-support">Checking WebUSB support...</span></p>
+    </footer>
+
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>
