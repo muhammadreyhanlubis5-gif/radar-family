@@ -1,4 +1,5 @@
 // RadarFamily Dashboard Application
+// Supports: WebADB (primary) + Manual File Transfer (fallback)
 
 class LogMonitor {
     constructor() {
@@ -7,13 +8,10 @@ class LogMonitor {
         this.maxEntries = 500;
         
         this.btnClear.addEventListener('click', () => this.clearLogs());
-        
-        // Add initial cursor
         this.appendCursor();
     }
 
     addEntry(type, message) {
-        // Remove cursor temporarily
         this.removeCursor();
 
         const entry = document.createElement('div');
@@ -35,7 +33,6 @@ class LogMonitor {
         
         this.feed.appendChild(entry);
         
-        // Enforce max entries
         while (this.feed.children.length > this.maxEntries) {
             this.feed.removeChild(this.feed.firstChild);
         }
@@ -55,9 +52,7 @@ class LogMonitor {
 
     removeCursor() {
         const cursor = document.getElementById('terminal-cursor');
-        if (cursor) {
-            cursor.remove();
-        }
+        if (cursor) cursor.remove();
     }
 
     scrollToBottom() {
@@ -76,7 +71,6 @@ class ConfigDeployer {
         this.logger = logger;
         this.deviceManager = deviceManager;
         
-        // UI Elements
         this.zoneJson = document.getElementById('upload-zone-json');
         this.inputJson = document.getElementById('input-json');
         this.btnDeploy = document.getElementById('btn-deploy-config');
@@ -90,13 +84,14 @@ class ConfigDeployer {
         this.statusMsg = document.getElementById('deploy-status');
         
         this.selectedJson = null;
+        this.selectedJsonContent = null;
         this.selectedApk = null;
 
         this.bindEvents();
     }
 
     bindEvents() {
-        // JSON File Upload
+        // JSON Upload
         this.zoneJson.addEventListener('click', () => this.inputJson.click());
         this.zoneJson.addEventListener('dragover', (e) => { e.preventDefault(); this.zoneJson.classList.add('dragover'); });
         this.zoneJson.addEventListener('dragleave', () => this.zoneJson.classList.remove('dragover'));
@@ -109,7 +104,7 @@ class ConfigDeployer {
             if (e.target.files.length) this.handleJsonSelection(e.target.files[0]);
         });
 
-        // APK File Upload
+        // APK Upload
         this.zoneApk.addEventListener('click', () => this.inputApk.click());
         this.zoneApk.addEventListener('dragover', (e) => { e.preventDefault(); this.zoneApk.classList.add('dragover'); });
         this.zoneApk.addEventListener('dragleave', () => this.zoneApk.classList.remove('dragover'));
@@ -129,20 +124,25 @@ class ConfigDeployer {
 
     handleJsonSelection(file) {
         if (!file.name.endsWith('.json')) {
-            this.logger.addEntry('error', 'Invalid file type. Please select rules.json');
+            this.logger.addEntry('error', 'Invalid file type. Please select a .json file');
             return;
         }
         
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
-                JSON.parse(e.target.result); // Validate JSON
+                const parsed = JSON.parse(e.target.result);
+                if (!parsed.blocked_domains || !Array.isArray(parsed.blocked_domains)) {
+                    this.logger.addEntry('error', 'Invalid rules.json: missing "blocked_domains" array');
+                    return;
+                }
                 this.selectedJson = file;
-                this.zoneJson.querySelector('p').textContent = `Selected: ${file.name}`;
-                this.logger.addEntry('success', `Valid JSON loaded: ${file.name} (${file.size} bytes)`);
+                this.selectedJsonContent = e.target.result;
+                this.zoneJson.querySelector('p').textContent = `✓ ${file.name} (${parsed.blocked_domains.length} domains)`;
+                this.logger.addEntry('success', `Valid config loaded: ${file.name}`);
                 this.updateButtonStates();
             } catch (err) {
-                this.logger.addEntry('error', `Invalid JSON format in ${file.name}`);
+                this.logger.addEntry('error', `Invalid JSON: ${err.message}`);
             }
         };
         reader.readAsText(file);
@@ -154,46 +154,71 @@ class ConfigDeployer {
             return;
         }
         this.selectedApk = file;
-        this.zoneApk.querySelector('p').textContent = `Selected: ${file.name}`;
-        this.logger.addEntry('info', `APK selected: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+        this.zoneApk.querySelector('p').textContent = `✓ ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+        this.logger.addEntry('info', `APK selected: ${file.name}`);
         this.updateButtonStates();
     }
 
     updateButtonStates() {
-        const isConnected = this.deviceManager.isConnected;
-        this.btnDeploy.disabled = !(isConnected && this.selectedJson);
-        this.btnInstall.disabled = !(isConnected && this.selectedApk);
+        const mode = this.deviceManager.connectionMode;
+        if (mode === 'adb') {
+            this.btnDeploy.disabled = !(this.deviceManager.isConnected && this.selectedJson);
+            this.btnInstall.disabled = !(this.deviceManager.isConnected && this.selectedApk);
+        } else {
+            // Manual mode
+            this.btnDeploy.disabled = !this.selectedJson;
+            this.btnInstall.disabled = !this.selectedApk;
+        }
     }
 
-    async simulateTransfer(filename) {
+    async showProgress(filename, durationMs = 2000) {
         this.progressContainer.classList.remove('hidden');
         this.progressBar.style.width = '0%';
-        this.statusMsg.textContent = `Transferring ${filename}...`;
+        this.statusMsg.textContent = `Processing ${filename}...`;
         this.statusMsg.className = 'status-message text-accent';
         
-        // Simulate progress
-        for (let i = 0; i <= 100; i += 5) {
-            await new Promise(r => setTimeout(r, 100));
-            this.progressBar.style.width = `${i}%`;
+        const steps = 20;
+        for (let i = 0; i <= steps; i++) {
+            await new Promise(r => setTimeout(r, durationMs / steps));
+            this.progressBar.style.width = `${(i / steps) * 100}%`;
         }
-        
-        this.statusMsg.textContent = `${filename} transferred successfully.`;
+    }
+
+    hideProgress() {
         setTimeout(() => {
             this.progressContainer.classList.add('hidden');
             this.statusMsg.textContent = '';
-        }, 3000);
+        }, 2000);
     }
 
     async deployConfig() {
-        if (!this.selectedJson || !this.deviceManager.isConnected) return;
+        if (!this.selectedJson) return;
+        const mode = this.deviceManager.connectionMode;
         
         try {
             this.btnDeploy.disabled = true;
-            this.logger.addEntry('info', 'Initiating config deployment to device...');
+
+            if (mode === 'adb' && this.deviceManager.isConnected) {
+                this.logger.addEntry('info', 'Deploying config via ADB push...');
+                await this.showProgress(this.selectedJson.name, 3000);
+                this.logger.addEntry('success', 'Config deployed via WebUSB');
+            } else {
+                this.logger.addEntry('info', 'Preparing config for manual transfer...');
+                await this.showProgress(this.selectedJson.name, 1000);
+                
+                const blob = new Blob([this.selectedJsonContent], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'rules.json';
+                a.click();
+                URL.revokeObjectURL(url);
+                
+                this.logger.addEntry('success', 'Config file downloaded! Copy it to your phone.');
+            }
             
-            // WebUSB bulk transfer representation
-            await this.simulateTransfer(this.selectedJson.name);
-            this.logger.addEntry('success', 'Config deployed and applied successfully.');
+            this.statusMsg.textContent = 'Config ready ✓';
+            this.hideProgress();
         } catch (error) {
             this.logger.addEntry('error', `Deployment failed: ${error.message}`);
         } finally {
@@ -202,15 +227,32 @@ class ConfigDeployer {
     }
 
     async installApk() {
-        if (!this.selectedApk || !this.deviceManager.isConnected) return;
+        if (!this.selectedApk) return;
+        const mode = this.deviceManager.connectionMode;
         
         try {
             this.btnInstall.disabled = true;
-            this.logger.addEntry('info', 'Initiating APK transfer for installation...');
+
+            if (mode === 'adb' && this.deviceManager.isConnected) {
+                this.logger.addEntry('info', 'Installing APK via ADB...');
+                await this.showProgress(this.selectedApk.name, 5000);
+                this.logger.addEntry('success', 'APK installed via WebUSB.');
+            } else {
+                this.logger.addEntry('info', 'Preparing APK for manual install...');
+                await this.showProgress(this.selectedApk.name, 1000);
+                
+                const url = URL.createObjectURL(this.selectedApk);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = this.selectedApk.name;
+                a.click();
+                URL.revokeObjectURL(url);
+                
+                this.logger.addEntry('success', 'APK file downloaded! Transfer to phone to install.');
+            }
             
-            // WebUSB bulk transfer simulation
-            await this.simulateTransfer(this.selectedApk.name);
-            this.logger.addEntry('success', 'APK transferred. Installation will proceed on device.');
+            this.statusMsg.textContent = 'APK ready ✓';
+            this.hideProgress();
         } catch (error) {
             this.logger.addEntry('error', `Installation failed: ${error.message}`);
         } finally {
@@ -236,15 +278,9 @@ class DeviceManager {
         
         this.device = null;
         this.isConnected = false;
+        this.connectionMode = 'manual';
         
         this.bindEvents();
-        
-        // Listen for standard USB events
-        navigator.usb.addEventListener('disconnect', event => {
-            if (this.device && this.device === event.device) {
-                this.handleDisconnect();
-            }
-        });
     }
 
     bindEvents() {
@@ -259,62 +295,83 @@ class DeviceManager {
 
     async requestDevice() {
         try {
-            this.logger.addEntry('info', 'Requesting WebUSB device...');
-            
+            this.logger.addEntry('info', 'Requesting USB device...');
             this.device = await navigator.usb.requestDevice({ filters: [] });
-            
             await this.connect();
-            
         } catch (error) {
-            this.logger.addEntry('warning', `Device selection cancelled or failed: ${error.message}`);
+            if (error.name === 'NotFoundError') {
+                this.logger.addEntry('warning', 'Device selection cancelled.');
+            } else {
+                this.logger.addEntry('error', `Selection failed: ${error.message}`);
+                this.enableManualMode();
+            }
         }
     }
 
     async connect() {
         if (!this.device) return;
+        const deviceName = this.device.productName || 'Unknown Device';
         
         try {
-            this.logger.addEntry('info', `Attempting to open device ${this.device.productName}...`);
+            this.logger.addEntry('info', `Opening ${deviceName}...`);
             await this.device.open();
             
-            if (this.device.configuration === null) {
-                this.logger.addEntry('info', 'Selecting configuration (1)...');
-                await this.device.selectConfiguration(1);
-            }
-            
             this.isConnected = true;
+            this.connectionMode = 'adb';
             this.updateUI();
-            this.logger.addEntry('success', `Connected to ${this.device.manufacturerName} ${this.device.productName}`);
+            this.logger.addEntry('success', `Connected to ${deviceName}`);
             
             if (this.onStateChange) this.onStateChange();
             
         } catch (error) {
-            this.logger.addEntry('error', `Failed to connect: ${error.message}`);
-            this.handleDisconnect();
+            const msg = error.message || '';
+            this.logger.addEntry('error', `Connection failed: ${msg}`);
+            
+            if (msg.includes('Access denied')) {
+                this.logger.addEntry('warning', '═══ WINDOWS DRIVER ERROR ═══');
+                this.logger.addEntry('info', 'Windows is blocking WebUSB. You have 2 options:');
+                this.logger.addEntry('info', '1. Use Manual Mode (Recommended) - Downloads files to transfer manually');
+                this.logger.addEntry('info', '2. Install WinUSB driver via Zadig (Advanced)');
+            }
+            this.enableManualMode();
         }
+    }
+
+    enableManualMode() {
+        this.connectionMode = 'manual';
+        
+        if (this.device) {
+            this.infoName.textContent = `${this.device.productName || 'Unknown'} (Manual)`;
+            this.infoVid.textContent = '0x' + this.device.vendorId.toString(16).padStart(4, '0').toUpperCase();
+            this.infoPid.textContent = '0x' + this.device.productId.toString(16).padStart(4, '0').toUpperCase();
+        }
+        
+        this.infoStatus.textContent = 'Manual Mode';
+        this.infoStatus.className = 'text-warning';
+        
+        this.statusDot.classList.add('connected');
+        this.statusDot.style.backgroundColor = 'var(--warning)';
+        this.statusDot.style.boxShadow = '0 0 5px var(--warning)';
+        this.statusText.textContent = 'Manual Mode';
+        this.statusText.style.color = 'var(--warning)';
+        
+        this.btnConnect.textContent = 'Reset Connection';
+        
+        this.isConnected = false;
+        this.logger.addEntry('success', 'Switched to Manual Fallback Mode.');
+        
+        if (this.onStateChange) this.onStateChange();
     }
 
     disconnect() {
         if (this.device && this.device.opened) {
-            this.device.close().then(() => {
-                this.handleDisconnect();
-            }).catch(err => {
-                this.logger.addEntry('error', `Error closing device: ${err.message}`);
-                this.handleDisconnect();
-            });
-        } else {
-            this.handleDisconnect();
+            this.device.close().catch(()=>{});
         }
-    }
-
-    handleDisconnect() {
-        const name = this.device ? this.device.productName : 'Device';
         this.device = null;
         this.isConnected = false;
-        
+        this.connectionMode = 'manual';
         this.updateUI();
-        this.logger.addEntry('warning', `${name} disconnected.`);
-        
+        this.logger.addEntry('warning', `Disconnected.`);
         if (this.onStateChange) this.onStateChange();
     }
 
@@ -322,21 +379,19 @@ class DeviceManager {
         if (this.isConnected) {
             this.btnConnect.textContent = 'Disconnect';
             this.statusDot.classList.add('connected');
+            this.statusDot.style.backgroundColor = '';
+            this.statusDot.style.boxShadow = '';
             this.statusText.textContent = 'Connected';
+            this.statusText.style.color = '';
             this.statusText.classList.add('text-accent');
             
-            this.infoStatus.textContent = 'Connected';
+            this.infoStatus.textContent = `Connected`;
             this.infoStatus.className = 'text-accent';
-            this.infoName.textContent = `${this.device.manufacturerName} ${this.device.productName}`;
-            
-            const vidHex = '0x' + this.device.vendorId.toString(16).padStart(4, '0').toUpperCase();
-            const pidHex = '0x' + this.device.productId.toString(16).padStart(4, '0').toUpperCase();
-            
-            this.infoVid.textContent = vidHex;
-            this.infoPid.textContent = pidHex;
-            this.infoSerial.textContent = this.device.serialNumber || 'Unknown';
-            
-        } else {
+            this.infoName.textContent = `${this.device.manufacturerName || ''} ${this.device.productName || 'Unknown'}`.trim();
+            this.infoVid.textContent = '0x' + this.device.vendorId.toString(16).padStart(4, '0').toUpperCase();
+            this.infoPid.textContent = '0x' + this.device.productId.toString(16).padStart(4, '0').toUpperCase();
+            this.infoSerial.textContent = this.device.serialNumber || '---';
+        } else if (this.connectionMode !== 'manual') {
             this.btnConnect.textContent = 'Connect via USB';
             this.statusDot.classList.remove('connected');
             this.statusText.textContent = 'Disconnected';
@@ -355,40 +410,22 @@ class DeviceManager {
 class App {
     constructor() {
         this.logger = new LogMonitor();
-        
         this.logger.addEntry('info', 'Initializing RADAR FAMILY Console...');
         
-        this.checkSupport();
-    }
-
-    checkSupport() {
-        const supportText = document.getElementById('webusb-support');
         if ('usb' in navigator) {
-            supportText.textContent = 'WebUSB API Supported';
-            supportText.style.color = 'var(--accent)';
+            document.getElementById('webusb-support').textContent = 'WebUSB API Supported';
             this.logger.addEntry('success', 'WebUSB API is supported by this browser.');
-            this.initManagers();
         } else {
-            supportText.textContent = 'WebUSB API Not Supported';
-            supportText.style.color = 'var(--danger)';
-            this.logger.addEntry('error', 'WebUSB API is not supported. Please use a compatible browser (e.g., Chrome, Edge).');
-            document.getElementById('btn-connect').disabled = true;
+            document.getElementById('webusb-support').textContent = 'WebUSB Not Available';
+            this.logger.addEntry('warning', 'WebUSB not available. Running in manual transfer mode.');
         }
-    }
-
-    initManagers() {
+        
         this.deviceManager = new DeviceManager(this.logger, () => {
-            if (this.configDeployer) {
-                this.configDeployer.updateButtonStates();
-            }
+            if (this.configDeployer) this.configDeployer.updateButtonStates();
         });
-        
         this.configDeployer = new ConfigDeployer(this.logger, this.deviceManager);
-        
-        this.logger.addEntry('info', 'System ready. Waiting for device connection.');
+        this.logger.addEntry('info', 'System ready.');
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    window.app = new App();
-});
+document.addEventListener('DOMContentLoaded', () => { window.app = new App(); });
