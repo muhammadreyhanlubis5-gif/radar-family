@@ -20,9 +20,14 @@ jobs:
     - name: Run Build
       run: |
         cd android-client
-        gradle assembleDebug --stacktrace
+        gradle assembleDebug > build_log.txt 2>&1 || true
+        cat build_log.txt
+    - name: Upload Log if Failed
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: android-client/build_log.txt
     - name: Upload APK
-      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: radar-family-app
