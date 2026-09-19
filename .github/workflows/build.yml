@@ -13,17 +13,14 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
-    - name: Grant execute permission for gradlew
-      run: |
-        cd android-client
-        chmod +x gradlew || true
-    - name: Accept Android SDK licenses
-      run: yes | "/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: 8.7
     - name: Run Build
       run: |
         cd android-client
-        gradle wrapper
-        ./gradlew assembleDebug --stacktrace
+        gradle assembleDebug --stacktrace
     - name: Upload APK
       if: always()
       uses: actions/upload-artifact@v4
